@@ -85,11 +85,15 @@ def calculate_differences(matched_data: pl.DataFrame) -> pl.DataFrame:
 
     Produces:
       - ppm_diff_by_mz
+      - dalton_diff_by_mz
+      - dalton_diff_by_rt
       - rt_diff_by_mz
       - ppm_diff_by_rt
       - rt_diff_by_rt
     """
     result = matched_data.with_columns(
+        (abs(pl.col("mz") - pl.col("mz_by_mz"))).alias("dalton_diff_by_mz"),
+        (abs(pl.col("mz") - pl.col("mz_by_rt"))).alias("dalton_diff_by_rt"),
         ((abs(pl.col("mz") - pl.col("mz_by_mz")) / pl.col("mz_by_mz")) * 1_000_000).alias("ppm_diff_by_mz"),
         (pl.col("rt") - pl.col("rt_by_mz")).abs().alias("rt_diff_by_mz"),
         ((abs(pl.col("mz") - pl.col("mz_by_rt")) / pl.col("mz_by_rt")) * 1_000_000).alias("ppm_diff_by_rt"),
