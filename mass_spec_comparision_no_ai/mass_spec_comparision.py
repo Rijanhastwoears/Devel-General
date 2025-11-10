@@ -200,12 +200,14 @@ def load_dataframe(file_path: str) -> pl.DataFrame:
     
     if suffix == '.csv':
         return pl.read_csv(file_path)
+    elif suffix == '.tsv':
+        return pl.read_csv(file_path, separator='\t')
     elif suffix in ['.parquet', '.pq']:
         return pl.read_parquet(file_path)
     elif suffix in ['.xlsx', '.xls']:
         return pl.read_excel(file_path)
     else:
-        raise ValueError(f"Unsupported file format: {suffix}. Supported formats: .csv, .parquet, .xlsx")
+        raise ValueError(f"Unsupported file format: {suffix}. Supported formats: .csv, .tsv, .parquet, .xlsx")
 
 
 def save_dataframe(df: pl.DataFrame, output_path: str) -> None:
@@ -219,12 +221,14 @@ def save_dataframe(df: pl.DataFrame, output_path: str) -> None:
     
     if suffix == '.csv':
         df.write_csv(output_path)
+    elif suffix == '.tsv':
+        df.write_csv(output_path, separator='\t')
     elif suffix in ['.parquet', '.pq']:
         df.write_parquet(output_path)
     elif suffix in ['.xlsx', '.xls']:
         df.write_excel(output_path)
     else:
-        raise ValueError(f"Unsupported output format: {suffix}. Supported formats: .csv, .parquet, .xlsx")
+        raise ValueError(f"Unsupported output format: {suffix}. Supported formats: .csv, .tsv, .parquet, .xlsx")
 
 
 def create_comparison_plots(matched_data: pl.DataFrame,
@@ -269,15 +273,16 @@ def main():
         epilog='''
 Examples:
   %(prog)s alt_data.csv ground_truth.csv
+  %(prog)s alt_data.tsv ground_truth.tsv
   %(prog)s alt_data.csv ground_truth.csv --mz-tolerance 0.01 --rt-tolerance 0.5
-  %(prog)s alt_data.csv ground_truth.csv --output results.csv --plots plots/
+  %(prog)s alt_data.csv ground_truth.csv --output results.tsv --formats tsv
   %(prog)s alt_data.parquet ground_truth.parquet --output-dir results/ --formats csv parquet
         '''
     )
     
     # Positional arguments
-    parser.add_argument('alt_data', help='Path to alternative data file (CSV, Parquet, Excel)')
-    parser.add_argument('ground_truth', help='Path to ground truth data file (CSV, Parquet, Excel)')
+    parser.add_argument('alt_data', help='Path to alternative data file (CSV, TSV, Parquet, Excel)')
+    parser.add_argument('ground_truth', help='Path to ground truth data file (CSV, TSV, Parquet, Excel)')
     
     # Optional arguments
     parser.add_argument('--mz-tolerance', type=float, default=None,
@@ -288,7 +293,7 @@ Examples:
                        help='Output file path for results (default: stdout)')
     parser.add_argument('--output-dir', '-d', type=str, default='.',
                        help='Output directory for results and plots (default: current directory)')
-    parser.add_argument('--formats', nargs='+', choices=['csv', 'parquet', 'excel'],
+    parser.add_argument('--formats', nargs='+', choices=['csv', 'tsv', 'parquet', 'excel'],
                        default=['csv'], help='Output formats to generate')
     parser.add_argument('--no-plots', action='store_true',
                        help='Skip plot generation')
@@ -346,6 +351,9 @@ Examples:
             if fmt == 'csv':
                 output_file = output_dir / 'results.csv'
                 diff_data.write_csv(output_file)
+            elif fmt == 'tsv':
+                output_file = output_dir / 'results.tsv'
+                diff_data.write_csv(output_file, separator='\t')
             elif fmt == 'parquet':
                 output_file = output_dir / 'results.parquet'
                 diff_data.write_parquet(output_file)

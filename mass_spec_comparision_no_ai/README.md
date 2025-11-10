@@ -22,15 +22,15 @@ python mass_spec_comparision.py [OPTIONS] alt_data ground_truth
 ```
 
 ### Positional Arguments
-- `alt_data`: Path to alternative data file (CSV, Parquet, Excel)
-- `ground_truth`: Path to ground truth data file (CSV, Parquet, Excel)
+- `alt_data`: Path to alternative data file (CSV, TSV, Parquet, Excel)
+- `ground_truth`: Path to ground truth data file (CSV, TSV, Parquet, Excel)
 
 ### Options
 - `--mz-tolerance FLOAT`: Absolute tolerance for m/z matching (Da)
 - `--rt-tolerance FLOAT`: Absolute tolerance for retention time matching (min)
 - `--output, -o TEXT`: Output file path for results (default: stdout)
 - `--output-dir, -d TEXT`: Output directory for results and plots (default: current directory)
-- `--formats TEXT [TEXT ...]`: Output formats to generate (choices: csv, parquet, excel)
+- `--formats TEXT [TEXT ...]`: Output formats to generate (choices: csv, tsv, parquet, excel)
 - `--no-plots`: Skip plot generation
 - `--plots-dir TEXT`: Directory for plots (default: plots)
 - `--quiet, -q`: Suppress informational output
@@ -42,11 +42,14 @@ python mass_spec_comparision.py [OPTIONS] alt_data ground_truth
 # Basic usage
 python mass_spec_comparision.py alt_data.csv ground_truth.csv
 
+# Using TSV files
+python mass_spec_comparision.py alt_data.tsv ground_truth.tsv
+
 # With tolerances and custom output
-python mass_spec_comparision.py alt_data.csv ground_truth.csv --mz-tolerance 0.01 --rt-tolerance 0.5 --output results.csv
+python mass_spec_comparision.py alt_data.csv ground_truth.csv --mz-tolerance 0.01 --rt-tolerance 0.5 --output results.tsv
 
 # Generate multiple output formats and plots
-python mass_spec_comparision.py alt_data.parquet ground_truth.parquet --output-dir results/ --formats csv parquet excel
+python mass_spec_comparision.py alt_data.parquet ground_truth.parquet --output-dir results/ --formats csv tsv parquet excel
 
 # Quiet mode with custom plots directory
 python mass_spec_comparision.py alt_data.csv ground_truth.csv --quiet --plots-dir comparison_plots
@@ -129,5 +132,5 @@ diffs = calculate_differences(matched)
 ## Notes
 - The implementation uses Polars `join_asof` (strategy="nearest") under the hood. Inputs are cast to Float64 and the original input order is preserved.
 - Use the `tolerance_*` parameters when you want to reject far-away matches rather than accept the nearest match unconditionally.
-- CLI supports CSV, Parquet, and Excel file formats for both input and output.
+- CLI supports CSV, TSV, Parquet, and Excel file formats for both input and output.
 - Generated plots include statistical summaries and use a color scheme that reflects tolerance compliance.

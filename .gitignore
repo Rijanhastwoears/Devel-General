@@ -1,3 +1,6 @@
 # Generally these tend to be data files
 *.csv
 *.tsv
+
+# Generally these files tend to be binary images
+*.png
