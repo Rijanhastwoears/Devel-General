@@ -11,6 +11,7 @@ def match_ground_truth(
     ground_truth: pl.DataFrame,
     *,
     tolerance_mz: float | None = None,
+    tolerance_ppm: float | None = None,
     tolerance_rt: float | None = None,
 ) -> pl.DataFrame:
     """
@@ -22,6 +23,11 @@ def match_ground_truth(
 
     Optional tolerances (absolute) can be passed; if the nearest neighbour is
     further than the tolerance the matched columns will be null.
+
+    Parameters:
+    - tolerance_mz: Absolute m/z tolerance in Daltons (Da)
+    - tolerance_ppm: Relative m/z tolerance in parts per million (ppm)
+    - tolerance_rt: Absolute retention time tolerance in minutes
 
     Notes
     - Inputs are not mutated; a new DataFrame is returned.
@@ -39,6 +45,10 @@ def match_ground_truth(
     alt = alt_data.with_columns(pl.col("mz").cast(pl.Float64), pl.col("rt").cast(pl.Float64))
     gt = ground_truth.with_columns(pl.col("mz").cast(pl.Float64), pl.col("rt").cast(pl.Float64))
 
+    # Validate that only one tolerance type is specified
+    if tolerance_mz is not None and tolerance_ppm is not None:
+        raise ValueError("Cannot specify both tolerance_mz and tolerance_ppm")
+
     # Prepare ground-truth frames sorted for asof joins; alias columns to produce clear result names
     gt_by_mz = gt.sort("mz").select([pl.col("mz").alias("mz_by_mz"), pl.col("rt").alias("rt_by_mz"), pl.col("mz")])
     gt_by_rt = gt.sort("rt").select([pl.col("mz").alias("mz_by_rt"), pl.col("rt").alias("rt_by_rt"), pl.col("rt")])
@@ -47,17 +57,32 @@ def match_ground_truth(
     alt_indexed = alt.with_row_index("_alt_idx")
 
     # As-of join by mz (sort by mz on the left for join_asof)
-    joined_mz_idx = (
-        alt_indexed.sort("mz")
-        .join_asof(
-            gt_by_mz,
-            left_on="mz",
-            right_on="mz",
-            strategy="nearest",
-            tolerance=tolerance_mz,
+    if tolerance_ppm is not None:
+        # For ppm tolerance, we need to join without tolerance first, then filter by ppm
+        # since asof join doesn't support row-specific tolerances
+        joined_mz_idx = (
+            alt_indexed.sort("mz")
+            .join_asof(
+                gt_by_mz,
+                left_on="mz",
+                right_on="mz",
+                strategy="nearest",
+            )
+            .filter((abs(pl.col("mz") - pl.col("mz_by_mz")) / pl.col("mz_by_mz") * 1_000_000) <= tolerance_ppm)
+            .select("_alt_idx", "mz_by_mz", "rt_by_mz")
         )
-        .select("_alt_idx", "mz_by_mz", "rt_by_mz")
-    )
+    else:
+        joined_mz_idx = (
+            alt_indexed.sort("mz")
+            .join_asof(
+                gt_by_mz,
+                left_on="mz",
+                right_on="mz",
+                strategy="nearest",
+                tolerance=tolerance_mz,
+            )
+            .select("_alt_idx", "mz_by_mz", "rt_by_mz")
+        )
 
     # As-of join by rt (sort by rt on the left for join_asof)
     joined_rt_idx = (
@@ -233,6 +258,7 @@ def save_dataframe(df: pl.DataFrame, output_path: str) -> None:
 
 def create_comparison_plots(matched_data: pl.DataFrame,
                           tolerance_mz: float,
+                          tolerance_ppm: float,
                           tolerance_rt: float,
                           output_dir: str) -> None:
     """Create comparison plots and save them."""
@@ -252,10 +278,18 @@ def create_comparison_plots(matched_data: pl.DataFrame,
     
     for x_col, y_col, title, filename in plots:
         if x_col in diff_data.columns and y_col in diff_data.columns:
+            # Determine appropriate tolerance for x-axis
+            if 'ppm' in x_col:
+                x_tol = tolerance_ppm if tolerance_ppm is not None else float('inf')
+            elif 'dalton' in x_col:
+                x_tol = tolerance_mz
+            else:
+                x_tol = tolerance_rt
+            
             fig = plot_tolerance_scatter(
                 diff_data[x_col],
                 diff_data[y_col],
-                tolerance_mz if 'ppm' in x_col or 'dalton' in x_col else tolerance_rt,
+                x_tol,
                 tolerance_rt,
                 x_label=x_col.replace('_', ' ').title(),
                 y_label=y_col.replace('_', ' ').title(),
@@ -287,6 +321,8 @@ Examples:
     # Optional arguments
     parser.add_argument('--mz-tolerance', type=float, default=None,
                        help='Absolute tolerance for m/z matching (Da)')
+    parser.add_argument('--ppm-tolerance', type=float, default=None,
+                       help='Relative tolerance for m/z matching (ppm - parts per million)')
     parser.add_argument('--rt-tolerance', type=float, default=None,
                        help='Absolute tolerance for retention time matching (min)')
     parser.add_argument('--output', '-o', type=str, default=None,
@@ -335,6 +371,7 @@ Examples:
             alt_data,
             ground_truth,
             tolerance_mz=args.mz_tolerance,
+            tolerance_ppm=args.ppm_tolerance,
             tolerance_rt=args.rt_tolerance
         )
         
@@ -369,7 +406,7 @@ Examples:
             if not args.quiet:
                 print("Generating comparison plots...")
             plots_dir = output_dir / args.plots_dir
-            create_comparison_plots(diff_data, args.mz_tolerance or 0, args.rt_tolerance or 0, str(plots_dir))
+            create_comparison_plots(diff_data, args.mz_tolerance or 0, args.ppm_tolerance or 0, args.rt_tolerance or 0, str(plots_dir))
             
             if not args.quiet:
                 print(f"Plots saved to {plots_dir}")
@@ -380,13 +417,20 @@ Examples:
             print(f"Total matches: {len(diff_data)}")
             
             # Count matches within tolerances
-            mz_tol = args.mz_tolerance if args.mz_tolerance is not None else float('inf')
-            rt_tol = args.rt_tolerance if args.rt_tolerance is not None else float('inf')
+            if args.mz_tolerance is not None:
+                mz_tol = args.mz_tolerance
+                within_mz = (diff_data['ppm_diff_by_mz'] < mz_tol * 1e6).sum()
+                print(f"Matches within m/z tolerance ({mz_tol} Da): {within_mz} ({within_mz/len(diff_data)*100:.1f}%)")
+            elif args.ppm_tolerance is not None:
+                ppm_tol = args.ppm_tolerance
+                within_ppm = (diff_data['ppm_diff_by_mz'] < ppm_tol).sum()
+                print(f"Matches within PPM tolerance ({ppm_tol} ppm): {within_ppm} ({within_ppm/len(diff_data)*100:.1f}%)")
+            else:
+                print("No m/z or PPM tolerance specified")
             
-            within_mz = (diff_data['ppm_diff_by_mz'] < mz_tol * 1e6).sum() if mz_tol != float('inf') else len(diff_data)
+            rt_tol = args.rt_tolerance if args.rt_tolerance is not None else float('inf')
             within_rt = (diff_data['rt_diff_by_mz'] < rt_tol).sum() if rt_tol != float('inf') else len(diff_data)
             
-            print(f"Matches within m/z tolerance ({mz_tol} Da): {within_mz} ({within_mz/len(diff_data)*100:.1f}%)")
             print(f"Matches within RT tolerance ({rt_tol} min): {within_rt} ({within_rt/len(diff_data)*100:.1f}%)")
             
             if 'ppm_diff_by_mz' in diff_data.columns:

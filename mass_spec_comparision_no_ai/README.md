@@ -27,6 +27,7 @@ python mass_spec_comparision.py [OPTIONS] alt_data ground_truth
 
 ### Options
 - `--mz-tolerance FLOAT`: Absolute tolerance for m/z matching (Da)
+- `--ppm-tolerance FLOAT`: Relative tolerance for m/z matching (ppm - parts per million)
 - `--rt-tolerance FLOAT`: Absolute tolerance for retention time matching (min)
 - `--output, -o TEXT`: Output file path for results (default: stdout)
 - `--output-dir, -d TEXT`: Output directory for results and plots (default: current directory)
@@ -45,14 +46,23 @@ python mass_spec_comparision.py alt_data.csv ground_truth.csv
 # Using TSV files
 python mass_spec_comparision.py alt_data.tsv ground_truth.tsv
 
-# With tolerances and custom output
-python mass_spec_comparision.py alt_data.csv ground_truth.csv --mz-tolerance 0.01 --rt-tolerance 0.5 --output results.tsv
+# With m/z and RT tolerances
+python mass_spec_comparision.py alt_data.csv ground_truth.csv --mz-tolerance 0.01 --rt-tolerance 0.5
+
+# With PPM tolerance (relative m/z matching)
+python mass_spec_comparision.py alt_data.csv ground_truth.csv --ppm-tolerance 5.0 --rt-tolerance 0.5
+
+# With custom output and formats
+python mass_spec_comparision.py alt_data.csv ground_truth.csv --output results.tsv --formats tsv
 
 # Generate multiple output formats and plots
 python mass_spec_comparision.py alt_data.parquet ground_truth.parquet --output-dir results/ --formats csv tsv parquet excel
 
 # Quiet mode with custom plots directory
 python mass_spec_comparision.py alt_data.csv ground_truth.csv --quiet --plots-dir comparison_plots
+
+# Using both m/z and RT tolerances with different units
+python mass_spec_comparision.py alt_data.csv ground_truth.csv --ppm-tolerance 10.0 --mz-tolerance 0.02 --rt-tolerance 1.0
 ```
 
 ### Input Requirements
