@@ -1,0 +1,3 @@
+# Generally these tend to be data files
+*.csv
+*.tsv
