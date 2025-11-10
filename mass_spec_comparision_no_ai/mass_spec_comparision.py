@@ -1,6 +1,10 @@
 import polars as pl
 import matplotlib.pyplot as plt
 import numpy as np
+import argparse
+import sys
+import os
+from pathlib import Path
 
 def match_ground_truth(
     alt_data: pl.DataFrame,
@@ -40,7 +44,7 @@ def match_ground_truth(
     gt_by_rt = gt.sort("rt").select([pl.col("mz").alias("mz_by_rt"), pl.col("rt").alias("rt_by_rt"), pl.col("rt")])
 
     # Add index to restore original order later
-    alt_indexed = alt.with_row_count("_alt_idx")
+    alt_indexed = alt.with_row_index("_alt_idx")
 
     # As-of join by mz (sort by mz on the left for join_asof)
     joined_mz_idx = (
@@ -183,3 +187,209 @@ def plot_tolerance_scatter(x_series: pl.Series, y_series: pl.Series,
 
     plt.tight_layout()
     return fig
+
+
+def load_dataframe(file_path: str) -> pl.DataFrame:
+    """Load a DataFrame from various file formats."""
+    file_path = Path(file_path)
+    
+    if not file_path.exists():
+        raise FileNotFoundError(f"File not found: {file_path}")
+    
+    suffix = file_path.suffix.lower()
+    
+    if suffix == '.csv':
+        return pl.read_csv(file_path)
+    elif suffix in ['.parquet', '.pq']:
+        return pl.read_parquet(file_path)
+    elif suffix in ['.xlsx', '.xls']:
+        return pl.read_excel(file_path)
+    else:
+        raise ValueError(f"Unsupported file format: {suffix}. Supported formats: .csv, .parquet, .xlsx")
+
+
+def save_dataframe(df: pl.DataFrame, output_path: str) -> None:
+    """Save a DataFrame to various file formats."""
+    output_path = Path(output_path)
+    
+    # Create directory if it doesn't exist
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    suffix = output_path.suffix.lower()
+    
+    if suffix == '.csv':
+        df.write_csv(output_path)
+    elif suffix in ['.parquet', '.pq']:
+        df.write_parquet(output_path)
+    elif suffix in ['.xlsx', '.xls']:
+        df.write_excel(output_path)
+    else:
+        raise ValueError(f"Unsupported output format: {suffix}. Supported formats: .csv, .parquet, .xlsx")
+
+
+def create_comparison_plots(matched_data: pl.DataFrame,
+                          tolerance_mz: float,
+                          tolerance_rt: float,
+                          output_dir: str) -> None:
+    """Create comparison plots and save them."""
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    
+    # Calculate differences
+    diff_data = calculate_differences(matched_data)
+    
+    # Create plots
+    plots = [
+        ('ppm_diff_by_mz', 'rt_diff_by_mz', 'PPM vs RT Differences (by MZ)', 'mz_tolerance_plots.png'),
+        ('ppm_diff_by_rt', 'rt_diff_by_rt', 'PPM vs RT Differences (by RT)', 'rt_tolerance_plots.png'),
+        ('dalton_diff_by_mz', 'rt_diff_by_mz', 'Dalton vs RT Differences (by MZ)', 'dalton_rt_mz_plots.png'),
+        ('dalton_diff_by_rt', 'rt_diff_by_rt', 'Dalton vs RT Differences (by RT)', 'dalton_rt_rt_plots.png'),
+    ]
+    
+    for x_col, y_col, title, filename in plots:
+        if x_col in diff_data.columns and y_col in diff_data.columns:
+            fig = plot_tolerance_scatter(
+                diff_data[x_col],
+                diff_data[y_col],
+                tolerance_mz if 'ppm' in x_col or 'dalton' in x_col else tolerance_rt,
+                tolerance_rt,
+                x_label=x_col.replace('_', ' ').title(),
+                y_label=y_col.replace('_', ' ').title(),
+                title=title
+            )
+            fig.savefig(output_path / filename, dpi=300, bbox_inches='tight')
+            plt.close(fig)
+
+
+def main():
+    """Main CLI function."""
+    parser = argparse.ArgumentParser(
+        description='Compare mass spectrometry feature lists with ground truth data',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+Examples:
+  %(prog)s alt_data.csv ground_truth.csv
+  %(prog)s alt_data.csv ground_truth.csv --mz-tolerance 0.01 --rt-tolerance 0.5
+  %(prog)s alt_data.csv ground_truth.csv --output results.csv --plots plots/
+  %(prog)s alt_data.parquet ground_truth.parquet --output-dir results/ --formats csv parquet
+        '''
+    )
+    
+    # Positional arguments
+    parser.add_argument('alt_data', help='Path to alternative data file (CSV, Parquet, Excel)')
+    parser.add_argument('ground_truth', help='Path to ground truth data file (CSV, Parquet, Excel)')
+    
+    # Optional arguments
+    parser.add_argument('--mz-tolerance', type=float, default=None,
+                       help='Absolute tolerance for m/z matching (Da)')
+    parser.add_argument('--rt-tolerance', type=float, default=None,
+                       help='Absolute tolerance for retention time matching (min)')
+    parser.add_argument('--output', '-o', type=str, default=None,
+                       help='Output file path for results (default: stdout)')
+    parser.add_argument('--output-dir', '-d', type=str, default='.',
+                       help='Output directory for results and plots (default: current directory)')
+    parser.add_argument('--formats', nargs='+', choices=['csv', 'parquet', 'excel'],
+                       default=['csv'], help='Output formats to generate')
+    parser.add_argument('--no-plots', action='store_true',
+                       help='Skip plot generation')
+    parser.add_argument('--plots-dir', type=str, default='plots',
+                       help='Directory for plots (default: plots)')
+    parser.add_argument('--quiet', '-q', action='store_true',
+                       help='Suppress informational output')
+    
+    args = parser.parse_args()
+    
+    try:
+        # Load data
+        if not args.quiet:
+            print(f"Loading alternative data from {args.alt_data}...")
+        alt_data = load_dataframe(args.alt_data)
+        
+        if not args.quiet:
+            print(f"Loading ground truth data from {args.ground_truth}...")
+        ground_truth = load_dataframe(args.ground_truth)
+        
+        # Validate required columns
+        required_cols = ['mz', 'rt']
+        missing_alt = [col for col in required_cols if col not in alt_data.columns]
+        missing_gt = [col for col in required_cols if col not in ground_truth.columns]
+        
+        if missing_alt:
+            raise ValueError(f"Alternative data missing required columns: {missing_alt}")
+        if missing_gt:
+            raise ValueError(f"Ground truth data missing required columns: {missing_gt}")
+        
+        if not args.quiet:
+            print(f"Alternative data shape: {alt_data.shape}")
+            print(f"Ground truth data shape: {ground_truth.shape}")
+        
+        # Perform matching
+        if not args.quiet:
+            print("Performing nearest-neighbor matching...")
+        matched_data = match_ground_truth(
+            alt_data,
+            ground_truth,
+            tolerance_mz=args.mz_tolerance,
+            tolerance_rt=args.rt_tolerance
+        )
+        
+        # Calculate differences
+        if not args.quiet:
+            print("Calculating differences...")
+        diff_data = calculate_differences(matched_data)
+        
+        # Save results
+        output_dir = Path(args.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        for fmt in args.formats:
+            if fmt == 'csv':
+                output_file = output_dir / 'results.csv'
+                diff_data.write_csv(output_file)
+            elif fmt == 'parquet':
+                output_file = output_dir / 'results.parquet'
+                diff_data.write_parquet(output_file)
+            elif fmt == 'excel':
+                output_file = output_dir / 'results.xlsx'
+                diff_data.write_excel(output_file)
+            
+            if not args.quiet:
+                print(f"Results saved to {output_file}")
+        
+        # Generate plots
+        if not args.no_plots:
+            if not args.quiet:
+                print("Generating comparison plots...")
+            plots_dir = output_dir / args.plots_dir
+            create_comparison_plots(diff_data, args.mz_tolerance or 0, args.rt_tolerance or 0, str(plots_dir))
+            
+            if not args.quiet:
+                print(f"Plots saved to {plots_dir}")
+        
+        # Print summary statistics
+        if not args.quiet:
+            print("\nSummary Statistics:")
+            print(f"Total matches: {len(diff_data)}")
+            
+            # Count matches within tolerances
+            mz_tol = args.mz_tolerance if args.mz_tolerance is not None else float('inf')
+            rt_tol = args.rt_tolerance if args.rt_tolerance is not None else float('inf')
+            
+            within_mz = (diff_data['ppm_diff_by_mz'] < mz_tol * 1e6).sum() if mz_tol != float('inf') else len(diff_data)
+            within_rt = (diff_data['rt_diff_by_mz'] < rt_tol).sum() if rt_tol != float('inf') else len(diff_data)
+            
+            print(f"Matches within m/z tolerance ({mz_tol} Da): {within_mz} ({within_mz/len(diff_data)*100:.1f}%)")
+            print(f"Matches within RT tolerance ({rt_tol} min): {within_rt} ({within_rt/len(diff_data)*100:.1f}%)")
+            
+            if 'ppm_diff_by_mz' in diff_data.columns:
+                print(f"Mean PPM difference (by mz): {diff_data['ppm_diff_by_mz'].mean():.2f}")
+            if 'rt_diff_by_mz' in diff_data.columns:
+                print(f"Mean RT difference (by mz): {diff_data['rt_diff_by_mz'].mean():.2f}")
+    
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    main()
