@@ -4,3 +4,6 @@
 
 # Generally these files tend to be binary images
 *.png
+
+# Dear lord I hate Apple's DS_Store crap
+.DS_Store

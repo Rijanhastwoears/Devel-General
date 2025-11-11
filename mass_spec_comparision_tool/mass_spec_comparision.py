@@ -137,6 +137,7 @@ def plot_tolerance_scatter(x_series: pl.Series, y_series: pl.Series,
                            title: str = None, figsize: tuple = (10, 8)) -> plt.Figure:
     """
     Create an academic-style scatter plot with tolerance-based color coding.
+    Shows the full data range with tolerance highlighting.
 
     Color scheme:
       - Green: Below both x_tol and y_tol (good matches)
@@ -144,8 +145,25 @@ def plot_tolerance_scatter(x_series: pl.Series, y_series: pl.Series,
       - Yellow: Below y_tol only
       - Red: Above both tolerances (poor matches)
     """
-    x_data = x_series.to_numpy()
-    y_data = y_series.to_numpy()
+    # Filter out null values that can cause NaN axis limits
+    valid_mask = x_series.is_not_null() & y_series.is_not_null()
+    valid_x = x_series.filter(valid_mask)
+    valid_y = y_series.filter(valid_mask)
+    
+    if len(valid_x) == 0 or len(valid_y) == 0:
+        # If no valid data, create empty plot
+        fig, ax = plt.subplots(figsize=figsize)
+        ax.text(0.5, 0.5, 'No valid data to plot',
+                transform=ax.transAxes, ha='center', va='center',
+                fontsize=14, bbox=dict(boxstyle='round', facecolor='lightgray'))
+        ax.set_xlabel(x_label or x_series.name or 'X', fontsize=12, fontweight='bold')
+        ax.set_ylabel(y_label or y_series.name or 'Y', fontsize=12, fontweight='bold')
+        ax.set_title(title or 'Tolerance Analysis', fontsize=14, fontweight='bold', pad=20)
+        plt.tight_layout()
+        return fig
+    
+    x_data = valid_x.to_numpy()
+    y_data = valid_y.to_numpy()
 
     below_x = np.abs(x_data) < x_tol
     below_y = np.abs(y_data) < y_tol
@@ -157,33 +175,47 @@ def plot_tolerance_scatter(x_series: pl.Series, y_series: pl.Series,
 
     fig, ax = plt.subplots(figsize=figsize)
 
-    if np.any(green_mask):
-        ax.scatter(x_data[green_mask], y_data[green_mask],
-                   c='green', alpha=0.6, s=50, label='Within both tolerances',
-                   edgecolors='darkgreen', linewidth=0.5)
-
+    # Plot points in order to ensure proper layering
+    if np.any(red_mask):
+        ax.scatter(x_data[red_mask], y_data[red_mask],
+                   c='red', alpha=0.6, s=50, label='Outside both tolerances',
+                   edgecolors='darkred', linewidth=0.5, zorder=1)
+    
     if np.any(blue_mask):
         ax.scatter(x_data[blue_mask], y_data[blue_mask],
                    c='blue', alpha=0.6, s=50, label='Within x-tolerance only',
-                   edgecolors='darkblue', linewidth=0.5)
+                   edgecolors='darkblue', linewidth=0.5, zorder=2)
 
     if np.any(yellow_mask):
         ax.scatter(x_data[yellow_mask], y_data[yellow_mask],
                    c='gold', alpha=0.6, s=50, label='Within y-tolerance only',
-                   edgecolors='orange', linewidth=0.5)
+                   edgecolors='orange', linewidth=0.5, zorder=2)
+    
+    if np.any(green_mask):
+        ax.scatter(x_data[green_mask], y_data[green_mask],
+                   c='green', alpha=0.6, s=50, label='Within both tolerances',
+                   edgecolors='darkgreen', linewidth=0.5, zorder=3)
 
-    if np.any(red_mask):
-        ax.scatter(x_data[red_mask], y_data[red_mask],
-                   c='red', alpha=0.6, s=50, label='Outside both tolerances',
-                   edgecolors='darkred', linewidth=0.5)
+    # Calculate data ranges for setting appropriate limits
+    x_range = x_data.max() - x_data.min()
+    y_range = y_data.max() - y_data.min()
+    x_margin = x_range * 0.05  # 5% margin
+    y_margin = y_range * 0.05  # 5% margin
 
-    ax.axvline(x=x_tol, color='blue', linestyle='--', linewidth=1.5, alpha=0.7, label=f'x-tolerance = ±{x_tol}')
-    ax.axvline(x=-x_tol, color='blue', linestyle='--', linewidth=1.5, alpha=0.7)
-    ax.axhline(y=y_tol, color='orange', linestyle='--', linewidth=1.5, alpha=0.7, label=f'y-tolerance = ±{y_tol}')
-    ax.axhline(y=-y_tol, color='orange', linestyle='--', linewidth=1.5, alpha=0.7)
+    # Set axis limits to show full data range
+    ax.set_xlim(x_data.min() - x_margin, x_data.max() + x_margin)
+    ax.set_ylim(y_data.min() - y_margin, y_data.max() + y_margin)
 
-    ax.axvspan(-x_tol, x_tol, alpha=0.1, color='green')
-    ax.axhspan(-y_tol, y_tol, alpha=0.1, color='green')
+    # Add tolerance lines and shaded regions
+    if not np.isinf(x_tol):
+        ax.axvline(x=x_tol, color='blue', linestyle='--', linewidth=1.5, alpha=0.7, label=f'x-tolerance = ±{x_tol:.2f}')
+        ax.axvline(x=-x_tol, color='blue', linestyle='--', linewidth=1.5, alpha=0.7)
+        ax.axvspan(-x_tol, x_tol, alpha=0.1, color='green', zorder=0)
+
+    if not np.isinf(y_tol):
+        ax.axhline(y=y_tol, color='orange', linestyle='--', linewidth=1.5, alpha=0.7, label=f'y-tolerance = ±{y_tol:.2f}')
+        ax.axhline(y=-y_tol, color='orange', linestyle='--', linewidth=1.5, alpha=0.7)
+        ax.axhspan(-y_tol, y_tol, alpha=0.1, color='green', zorder=0)
 
     ax.set_xlabel(x_label or x_series.name or 'X', fontsize=12, fontweight='bold')
     ax.set_ylabel(y_label or y_series.name or 'Y', fontsize=12, fontweight='bold')
@@ -192,14 +224,19 @@ def plot_tolerance_scatter(x_series: pl.Series, y_series: pl.Series,
     ax.grid(True, alpha=0.3, linestyle=':', linewidth=0.5)
     ax.legend(loc='best', frameon=True, shadow=True, fontsize=10)
 
-    total_points = len(x_data)
+    # Position stats box in upper left corner to avoid overlapping with tolerance lines
+    total_points = len(valid_x)  # Use the valid (non-null) data count
     green_count = np.sum(green_mask)
     blue_count = np.sum(blue_mask)
     yellow_count = np.sum(yellow_mask)
     red_count = np.sum(red_mask)
+    
+    null_count = len(x_series) - total_points  # Count of null values filtered out
 
     stats_text = (
-        f'Total points: {total_points}\n'
+        f'Total points: {len(x_series)}\n'
+        f'Valid points: {total_points}\n'
+        f'Null points: {null_count}\n'
         f'Within both: {green_count} ({green_count/total_points*100:.1f}%)\n'
         f'X only: {blue_count} ({blue_count/total_points*100:.1f}%)\n'
         f'Y only: {yellow_count} ({yellow_count/total_points*100:.1f}%)\n'
@@ -321,10 +358,10 @@ Examples:
     # Optional arguments
     parser.add_argument('--mz-tolerance', type=float, default=None,
                        help='Absolute tolerance for m/z matching (Da)')
-    parser.add_argument('--ppm-tolerance', type=float, default=None,
-                       help='Relative tolerance for m/z matching (ppm - parts per million)')
-    parser.add_argument('--rt-tolerance', type=float, default=None,
-                       help='Absolute tolerance for retention time matching (min)')
+    parser.add_argument('--ppm-tolerance', type=float, default=5.0,
+                       help='Relative tolerance for m/z matching (ppm - parts per million, default: 5 ppm)')
+    parser.add_argument('--rt-tolerance', type=float, default=0.5,
+                       help='Absolute tolerance for retention time matching (min, default: 0.5 min = 30 sec)')
     parser.add_argument('--output', '-o', type=str, default=None,
                        help='Output file path for results (default: stdout)')
     parser.add_argument('--output-dir', '-d', type=str, default='.',
@@ -414,29 +451,56 @@ Examples:
         # Print summary statistics
         if not args.quiet:
             print("\nSummary Statistics:")
-            print(f"Total matches: {len(diff_data)}")
+            print(f"Total alternative data rows: {len(diff_data)}")
             
-            # Count matches within tolerances
+            # Count matches that actually have valid matches (non-null mz_by_mz and rt_by_mz)
+            valid_mz_matches = diff_data.filter(pl.col("mz_by_mz").is_not_null())
+            valid_rt_matches = diff_data.filter(pl.col("rt_by_mz").is_not_null())
+            valid_both_matches = diff_data.filter(pl.col("mz_by_mz").is_not_null() & pl.col("rt_by_mz").is_not_null())
+            
+            print(f"Rows with valid m/z matches: {len(valid_mz_matches)} ({len(valid_mz_matches)/len(diff_data)*100:.1f}%)")
+            print(f"Rows with valid RT matches: {len(valid_rt_matches)} ({len(valid_rt_matches)/len(diff_data)*100:.1f}%)")
+            print(f"Rows with both m/z and RT matches: {len(valid_both_matches)} ({len(valid_both_matches)/len(diff_data)*100:.1f}%)")
+            
+            # Count matches within specified tolerances
             if args.mz_tolerance is not None:
                 mz_tol = args.mz_tolerance
-                within_mz = (diff_data['ppm_diff_by_mz'] < mz_tol * 1e6).sum()
-                print(f"Matches within m/z tolerance ({mz_tol} Da): {within_mz} ({within_mz/len(diff_data)*100:.1f}%)")
+                within_mz = valid_mz_matches.filter(pl.col("dalton_diff_by_mz") <= mz_tol)
+                print(f"Matches within m/z tolerance ({mz_tol} Da): {len(within_mz)} ({len(within_mz)/len(diff_data)*100:.1f}%)")
             elif args.ppm_tolerance is not None:
                 ppm_tol = args.ppm_tolerance
-                within_ppm = (diff_data['ppm_diff_by_mz'] < ppm_tol).sum()
-                print(f"Matches within PPM tolerance ({ppm_tol} ppm): {within_ppm} ({within_ppm/len(diff_data)*100:.1f}%)")
+                within_ppm = valid_mz_matches.filter(pl.col("ppm_diff_by_mz") <= ppm_tol)
+                print(f"Matches within PPM tolerance ({ppm_tol} ppm): {len(within_ppm)} ({len(within_ppm)/len(diff_data)*100:.1f}%)")
             else:
                 print("No m/z or PPM tolerance specified")
             
-            rt_tol = args.rt_tolerance if args.rt_tolerance is not None else float('inf')
-            within_rt = (diff_data['rt_diff_by_mz'] < rt_tol).sum() if rt_tol != float('inf') else len(diff_data)
+            if args.rt_tolerance is not None:
+                rt_tol = args.rt_tolerance
+                within_rt = valid_rt_matches.filter(pl.col("rt_diff_by_mz") <= rt_tol)
+                print(f"Matches within RT tolerance ({rt_tol} min): {len(within_rt)} ({len(within_rt)/len(diff_data)*100:.1f}%)")
+            else:
+                print("No RT tolerance specified")
             
-            print(f"Matches within RT tolerance ({rt_tol} min): {within_rt} ({within_rt/len(diff_data)*100:.1f}%)")
+            # Summary of matches meeting all specified tolerances
+            fully_within_tolerance = valid_both_matches
             
-            if 'ppm_diff_by_mz' in diff_data.columns:
-                print(f"Mean PPM difference (by mz): {diff_data['ppm_diff_by_mz'].mean():.2f}")
-            if 'rt_diff_by_mz' in diff_data.columns:
-                print(f"Mean RT difference (by mz): {diff_data['rt_diff_by_mz'].mean():.2f}")
+            if args.mz_tolerance is not None:
+                fully_within_tolerance = fully_within_tolerance.filter(pl.col("dalton_diff_by_mz") <= args.mz_tolerance)
+            elif args.ppm_tolerance is not None:
+                fully_within_tolerance = fully_within_tolerance.filter(pl.col("ppm_diff_by_mz") <= args.ppm_tolerance)
+                
+            if args.rt_tolerance is not None:
+                fully_within_tolerance = fully_within_tolerance.filter(pl.col("rt_diff_by_mz") <= args.rt_tolerance)
+            
+            if args.mz_tolerance is not None or args.ppm_tolerance is not None or args.rt_tolerance is not None:
+                print(f"Matches meeting all specified tolerances: {len(fully_within_tolerance)} ({len(fully_within_tolerance)/len(diff_data)*100:.1f}%)")
+            else:
+                print("No tolerances specified for comprehensive comparison")
+            
+            if 'ppm_diff_by_mz' in diff_data.columns and len(valid_mz_matches) > 0:
+                print(f"Mean PPM difference (by mz): {valid_mz_matches['ppm_diff_by_mz'].mean():.2f}")
+            if 'rt_diff_by_mz' in diff_data.columns and len(valid_rt_matches) > 0:
+                print(f"Mean RT difference (by mz): {valid_rt_matches['rt_diff_by_mz'].mean():.2f}")
     
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
