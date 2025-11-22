@@ -5,6 +5,7 @@ import argparse
 import sys
 import os
 from pathlib import Path
+import time
 
 def match_ground_truth(
     alt_data: pl.DataFrame,
@@ -131,122 +132,96 @@ def calculate_differences(matched_data: pl.DataFrame) -> pl.DataFrame:
     return result
 
 
-def plot_tolerance_scatter(x_series: pl.Series, y_series: pl.Series,
-                           x_tol: float, y_tol: float,
-                           x_label: str = None, y_label: str = None,
-                           title: str = None, figsize: tuple = (10, 8)) -> plt.Figure:
+def plot_tolerance_histogram(series: pl.Series, tolerance: float,
+                            x_label: str = None, title: str = None,
+                            figsize: tuple = (10, 8)) -> plt.Figure:
     """
-    Create an academic-style scatter plot with tolerance-based color coding.
-    Shows the full data range with tolerance highlighting.
-
-    Color scheme:
-      - Green: Below both x_tol and y_tol (good matches)
-      - Blue: Below x_tol only
-      - Yellow: Below y_tol only
-      - Red: Above both tolerances (poor matches)
-    """
-    # Filter out null values that can cause NaN axis limits
-    valid_mask = x_series.is_not_null() & y_series.is_not_null()
-    valid_x = x_series.filter(valid_mask)
-    valid_y = y_series.filter(valid_mask)
+    Create an academic-style histogram with tolerance-based color coding.
     
-    if len(valid_x) == 0 or len(valid_y) == 0:
+    Parameters:
+    - series: Data series to plot
+    - tolerance: Tolerance value for grouping
+    - x_label: Label for x-axis
+    - title: Plot title
+    - figsize: Figure size
+    
+    Returns:
+    - Figure object
+    """
+    # Filter out null values
+    valid_data = series.drop_nulls()
+    
+    if len(valid_data) == 0:
         # If no valid data, create empty plot
         fig, ax = plt.subplots(figsize=figsize)
         ax.text(0.5, 0.5, 'No valid data to plot',
                 transform=ax.transAxes, ha='center', va='center',
                 fontsize=14, bbox=dict(boxstyle='round', facecolor='lightgray'))
-        ax.set_xlabel(x_label or x_series.name or 'X', fontsize=12, fontweight='bold')
-        ax.set_ylabel(y_label or y_series.name or 'Y', fontsize=12, fontweight='bold')
-        ax.set_title(title or 'Tolerance Analysis', fontsize=14, fontweight='bold', pad=20)
+        ax.set_xlabel(x_label or series.name or 'Value', fontsize=12, fontweight='bold')
+        ax.set_title(title or 'Distribution Analysis', fontsize=14, fontweight='bold', pad=20)
         plt.tight_layout()
         return fig
     
-    x_data = valid_x.to_numpy()
-    y_data = valid_y.to_numpy()
-
-    below_x = np.abs(x_data) < x_tol
-    below_y = np.abs(y_data) < y_tol
-
-    green_mask = below_x & below_y
-    blue_mask = below_x & ~below_y
-    yellow_mask = ~below_x & below_y
-    red_mask = ~below_x & ~below_y
-
+    # Convert to numpy for easier manipulation
+    data = valid_data.to_numpy()
+    
+    # Create bins based on tolerance
+    max_val = np.max(np.abs(data))
+    if tolerance > 0:
+        bin_width = tolerance
+        num_bins = min(7, int(np.ceil(max_val / bin_width)) * 2 + 1)  # Ensure odd number of bins centered at 0
+        bins = np.linspace(-num_bins//2 * bin_width, (num_bins//2) * bin_width, num_bins+1)
+    else:
+        # If tolerance is 0 or negative, create 7 bins automatically
+        bins = np.linspace(-max_val, max_val, 8)
+    
+    # Create histogram
     fig, ax = plt.subplots(figsize=figsize)
-
-    # Plot points in order to ensure proper layering
-    if np.any(red_mask):
-        ax.scatter(x_data[red_mask], y_data[red_mask],
-                   c='red', alpha=0.6, s=50, label='Outside both tolerances',
-                   edgecolors='darkred', linewidth=0.5, zorder=1)
     
-    if np.any(blue_mask):
-        ax.scatter(x_data[blue_mask], y_data[blue_mask],
-                   c='blue', alpha=0.6, s=50, label='Within x-tolerance only',
-                   edgecolors='darkblue', linewidth=0.5, zorder=2)
-
-    if np.any(yellow_mask):
-        ax.scatter(x_data[yellow_mask], y_data[yellow_mask],
-                   c='gold', alpha=0.6, s=50, label='Within y-tolerance only',
-                   edgecolors='orange', linewidth=0.5, zorder=2)
+    # Define colors for each bin
+    colors = plt.cm.tab10(np.linspace(0, 1, len(bins)-1))
     
-    if np.any(green_mask):
-        ax.scatter(x_data[green_mask], y_data[green_mask],
-                   c='green', alpha=0.6, s=50, label='Within both tolerances',
-                   edgecolors='darkgreen', linewidth=0.5, zorder=3)
-
-    # Calculate data ranges for setting appropriate limits
-    x_range = x_data.max() - x_data.min()
-    y_range = y_data.max() - y_data.min()
-    x_margin = x_range * 0.05  # 5% margin
-    y_margin = y_range * 0.05  # 5% margin
-
-    # Set axis limits to show full data range
-    ax.set_xlim(x_data.min() - x_margin, x_data.max() + x_margin)
-    ax.set_ylim(y_data.min() - y_margin, y_data.max() + y_margin)
-
-    # Add tolerance lines and shaded regions
-    if not np.isinf(x_tol):
-        ax.axvline(x=x_tol, color='blue', linestyle='--', linewidth=1.5, alpha=0.7, label=f'x-tolerance = ±{x_tol:.2f}')
-        ax.axvline(x=-x_tol, color='blue', linestyle='--', linewidth=1.5, alpha=0.7)
-        ax.axvspan(-x_tol, x_tol, alpha=0.1, color='green', zorder=0)
-
-    if not np.isinf(y_tol):
-        ax.axhline(y=y_tol, color='orange', linestyle='--', linewidth=1.5, alpha=0.7, label=f'y-tolerance = ±{y_tol:.2f}')
-        ax.axhline(y=-y_tol, color='orange', linestyle='--', linewidth=1.5, alpha=0.7)
-        ax.axhspan(-y_tol, y_tol, alpha=0.1, color='green', zorder=0)
-
-    ax.set_xlabel(x_label or x_series.name or 'X', fontsize=12, fontweight='bold')
-    ax.set_ylabel(y_label or y_series.name or 'Y', fontsize=12, fontweight='bold')
-    ax.set_title(title or 'Tolerance Analysis', fontsize=14, fontweight='bold', pad=20)
-
-    ax.grid(True, alpha=0.3, linestyle=':', linewidth=0.5)
-    ax.legend(loc='best', frameon=True, shadow=True, fontsize=10)
-
-    # Position stats box in upper left corner to avoid overlapping with tolerance lines
-    total_points = len(valid_x)  # Use the valid (non-null) data count
-    green_count = np.sum(green_mask)
-    blue_count = np.sum(blue_mask)
-    yellow_count = np.sum(yellow_mask)
-    red_count = np.sum(red_mask)
+    # Create histogram with custom colors
+    n, bins_edges, patches = ax.hist(data, bins=bins, alpha=0.7, edgecolor='black')
     
-    null_count = len(x_series) - total_points  # Count of null values filtered out
-
+    # Color each bar differently
+    for i, patch in enumerate(patches):
+        patch.set_facecolor(colors[i])
+    
+    # Add tolerance line if tolerance is positive
+    if tolerance > 0:
+        ax.axvline(x=tolerance, color='red', linestyle='--', linewidth=1.5, alpha=0.7, label=f'Tolerance = ±{tolerance:.2f}')
+        ax.axvline(x=-tolerance, color='red', linestyle='--', linewidth=1.5, alpha=0.7)
+    
+    # Calculate statistics
+    mean_val = np.mean(data)
+    std_val = np.std(data)
+    within_tolerance = np.sum(np.abs(data) <= tolerance) if tolerance > 0 else 0
+    within_tolerance_pct = (within_tolerance / len(data)) * 100 if len(data) > 0 else 0
+    
+    # Add statistics text box
     stats_text = (
-        f'Total points: {len(x_series)}\n'
-        f'Valid points: {total_points}\n'
-        f'Null points: {null_count}\n'
-        f'Within both: {green_count} ({green_count/total_points*100:.1f}%)\n'
-        f'X only: {blue_count} ({blue_count/total_points*100:.1f}%)\n'
-        f'Y only: {yellow_count} ({yellow_count/total_points*100:.1f}%)\n'
-        f'Outside both: {red_count} ({red_count/total_points*100:.1f}%)'
+        f'Total points: {len(data)}\n'
+        f'Mean: {mean_val:.2f}\n'
+        f'Std Dev: {std_val:.2f}\n'
+        f'Within tolerance: {within_tolerance} ({within_tolerance_pct:.1f}%)'
     )
-
+    
     ax.text(0.02, 0.98, stats_text, transform=ax.transAxes,
             fontsize=9, verticalalignment='top',
             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8, edgecolor='gray'))
-
+    
+    # Set labels and title
+    ax.set_xlabel(x_label or series.name or 'Value', fontsize=12, fontweight='bold')
+    ax.set_title(title or 'Distribution Analysis', fontsize=14, fontweight='bold', pad=20)
+    
+    # Add grid
+    ax.grid(True, alpha=0.3, linestyle=':', linewidth=0.5)
+    
+    # Add legend positioned to avoid overlapping with the plot
+    if tolerance > 0:
+        ax.legend(loc='upper right', frameon=True, shadow=True, fontsize=10)
+    
     plt.tight_layout()
     return fig
 
@@ -298,38 +273,29 @@ def create_comparison_plots(matched_data: pl.DataFrame,
                           tolerance_ppm: float,
                           tolerance_rt: float,
                           output_dir: str) -> None:
-    """Create comparison plots and save them."""
+    """Create comparison histogram plots and save them."""
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
     
     # Calculate differences
     diff_data = calculate_differences(matched_data)
     
-    # Create plots
+    # Create plots for each relevant field
     plots = [
-        ('ppm_diff_by_mz', 'rt_diff_by_mz', 'PPM vs RT Differences (by MZ)', 'mz_tolerance_plots.png'),
-        ('ppm_diff_by_rt', 'rt_diff_by_rt', 'PPM vs RT Differences (by RT)', 'rt_tolerance_plots.png'),
-        ('dalton_diff_by_mz', 'rt_diff_by_mz', 'Dalton vs RT Differences (by MZ)', 'dalton_rt_mz_plots.png'),
-        ('dalton_diff_by_rt', 'rt_diff_by_rt', 'Dalton vs RT Differences (by RT)', 'dalton_rt_rt_plots.png'),
+        ('ppm_diff_by_mz', tolerance_ppm, 'PPM Differences (by MZ)', 'ppm_diff_by_mz.png'),
+        ('ppm_diff_by_rt', tolerance_ppm, 'PPM Differences (by RT)', 'ppm_diff_by_rt.png'),
+        ('dalton_diff_by_mz', tolerance_mz, 'Dalton Differences (by MZ)', 'dalton_diff_by_mz.png'),
+        ('dalton_diff_by_rt', tolerance_mz, 'Dalton Differences (by RT)', 'dalton_diff_by_rt.png'),
+        ('rt_diff_by_mz', tolerance_rt, 'RT Differences (by MZ)', 'rt_diff_by_mz.png'),
+        ('rt_diff_by_rt', tolerance_rt, 'RT Differences (by RT)', 'rt_diff_by_rt.png'),
     ]
     
-    for x_col, y_col, title, filename in plots:
-        if x_col in diff_data.columns and y_col in diff_data.columns:
-            # Determine appropriate tolerance for x-axis
-            if 'ppm' in x_col:
-                x_tol = tolerance_ppm if tolerance_ppm is not None else float('inf')
-            elif 'dalton' in x_col:
-                x_tol = tolerance_mz
-            else:
-                x_tol = tolerance_rt
-            
-            fig = plot_tolerance_scatter(
-                diff_data[x_col],
-                diff_data[y_col],
-                x_tol,
-                tolerance_rt,
-                x_label=x_col.replace('_', ' ').title(),
-                y_label=y_col.replace('_', ' ').title(),
+    for col, tolerance, title, filename in plots:
+        if col in diff_data.columns:
+            fig = plot_tolerance_histogram(
+                diff_data[col],
+                tolerance,
+                x_label=col.replace('_', ' ').title(),
                 title=title
             )
             fig.savefig(output_path / filename, dpi=300, bbox_inches='tight')
@@ -364,20 +330,45 @@ Examples:
                        help='Absolute tolerance for retention time matching (min, default: 0.5 min = 30 sec)')
     parser.add_argument('--output', '-o', type=str, default=None,
                        help='Output file path for results (default: stdout)')
-    parser.add_argument('--output-dir', '-d', type=str, default='.',
-                       help='Output directory for results and plots (default: current directory)')
     parser.add_argument('--formats', nargs='+', choices=['csv', 'tsv', 'parquet', 'excel'],
                        default=['csv'], help='Output formats to generate')
     parser.add_argument('--no-plots', action='store_true',
                        help='Skip plot generation')
-    parser.add_argument('--plots-dir', type=str, default='plots',
-                       help='Directory for plots (default: plots)')
     parser.add_argument('--quiet', '-q', action='store_true',
                        help='Suppress informational output')
+    parser.add_argument('--concise', action='store_true', default=True,
+                       help='Include only relevant fields in the output (default: True)')
+    parser.add_argument('--interactive', action='store_true', default=False,
+                       help='Run in interactive mode with Qt interface (default: False)')
     
     args = parser.parse_args()
     
+    # Handle interactive mode
+    if args.interactive:
+        # Placeholder for interactive Qt interface
+        if not args.quiet:
+            print("Interactive mode is not yet implemented.")
+        # In a full implementation, this would launch the Qt interface
+        return
+    
     try:
+        # Create a timestamped subdirectory
+        timestamp = int(time.time())
+        output_dir = Path("mass_comp_output") / str(timestamp)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Create a log file with the parameters
+        log_file = output_dir / "parameters.log"
+        with open(log_file, "w") as f:
+            f.write(f"Parameters used:\n")
+            f.write(f"Alternative data: {args.alt_data}\n")
+            f.write(f"Ground truth data: {args.ground_truth}\n")
+            f.write(f"MZ tolerance: {args.mz_tolerance}\n")
+            f.write(f"PPM tolerance: {args.ppm_tolerance}\n")
+            f.write(f"RT tolerance: {args.rt_tolerance}\n")
+            f.write(f"Concise mode: {args.concise}\n")
+            f.write(f"Interactive mode: {args.interactive}\n")
+        
         # Load data
         if not args.quiet:
             print(f"Loading alternative data from {args.alt_data}...")
@@ -417,10 +408,17 @@ Examples:
             print("Calculating differences...")
         diff_data = calculate_differences(matched_data)
         
-        # Save results
-        output_dir = Path(args.output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
+        # Apply concise mode if enabled
+        if args.concise:
+            # Select only relevant columns
+            relevant_cols = [
+                "mz", "rt", "mz_by_mz", "rt_by_mz", "mz_by_rt", "rt_by_rt",
+                "ppm_diff_by_mz", "dalton_diff_by_mz", "rt_diff_by_mz",
+                "ppm_diff_by_rt", "dalton_diff_by_rt", "rt_diff_by_rt"
+            ]
+            diff_data = diff_data.select([col for col in relevant_cols if col in diff_data.columns])
         
+        # Save results
         for fmt in args.formats:
             if fmt == 'csv':
                 output_file = output_dir / 'results.csv'
@@ -442,7 +440,7 @@ Examples:
         if not args.no_plots:
             if not args.quiet:
                 print("Generating comparison plots...")
-            plots_dir = output_dir / args.plots_dir
+            plots_dir = output_dir / 'plots'
             create_comparison_plots(diff_data, args.mz_tolerance or 0, args.ppm_tolerance or 0, args.rt_tolerance or 0, str(plots_dir))
             
             if not args.quiet:
