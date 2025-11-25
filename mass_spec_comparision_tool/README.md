@@ -1,146 +1,98 @@
-# mass_spec_comparision_no_ai
+# Mass Spec Comparison Workflow
 
-Utilities to compare alternative mass spectrometry feature lists with a ground truth list
-using nearest-neighbour matching on m/z and retention time (RT).
+A modular Python tool to compare two mass spectrometry datasets (Reference and Alternative). It identifies the closest matches, calculates differences (Absolute or PPM), sorts the results, and visualizes the distribution of differences.
 
-## Files
-- `mass_spec_comparision.py` - matching, difference calculation, plotting helpers, and CLI interface.
+## Features
+
+*   **Tabular Sorted Search**: Efficiently finds closest matches between datasets using binary search (via `polars`).
+*   **Difference Calculation**: Computes absolute differences between specified columns.
+*   **PPM Support**: Optionally calculates differences in Parts Per Million (PPM).
+*   **Automatic Sorting**: Results are automatically sorted by the difference column (ascending).
+*   **Visualization**:
+    *   **Absolute Difference**: Histogram with colored bars and legend (max 7 bins).
+    *   **PPM Difference**: Density plot with a configurable marker line.
+*   **Flexible Input**: Supports CSV, TSV, and other delimited files with auto-detection or explicit delimiters.
+
+## Requirements
+
+*   Python 3.x
+*   `polars`
+*   `matplotlib`
+*   `scipy`
+*   `numpy`
 
 ## Installation
 
-```bash
-# Install required dependencies
-pip install polars matplotlib numpy
-```
-
-## Command Line Interface
-
-The script provides a command-line interface for comparing mass spectrometry datasets:
+Ensure you have the required packages installed:
 
 ```bash
-python mass_spec_comparision.py [OPTIONS] alt_data ground_truth
+pip install polars matplotlib scipy numpy
 ```
 
-### Positional Arguments
-- `alt_data`: Path to alternative data file (CSV, TSV, Parquet, Excel)
-- `ground_truth`: Path to ground truth data file (CSV, TSV, Parquet, Excel)
+## Usage
 
-### Options
-- `--mz-tolerance FLOAT`: Absolute tolerance for m/z matching (Da)
-- `--ppm-tolerance FLOAT`: Relative tolerance for m/z matching (ppm - parts per million)
-- `--rt-tolerance FLOAT`: Absolute tolerance for retention time matching (min)
-- `--output, -o TEXT`: Output file path for results (default: stdout)
-- `--output-dir, -d TEXT`: Output directory for results and plots (default: current directory)
-- `--formats TEXT [TEXT ...]`: Output formats to generate (choices: csv, tsv, parquet, excel)
-- `--no-plots`: Skip plot generation
-- `--plots-dir TEXT`: Directory for plots (default: plots)
-- `--quiet, -q`: Suppress informational output
-- `-h, --help`: Show help message and exit
-
-### Examples
+### Command Line Interface (CLI)
 
 ```bash
-# Basic usage
-python mass_spec_comparision.py alt_data.csv ground_truth.csv
-
-# Using TSV files
-python mass_spec_comparision.py alt_data.tsv ground_truth.tsv
-
-# With m/z and RT tolerances
-python mass_spec_comparision.py alt_data.csv ground_truth.csv --mz-tolerance 0.01 --rt-tolerance 0.5
-
-# With PPM tolerance (relative m/z matching)
-python mass_spec_comparision.py alt_data.csv ground_truth.csv --ppm-tolerance 5.0 --rt-tolerance 0.5
-
-# With custom output and formats
-python mass_spec_comparision.py alt_data.csv ground_truth.csv --output results.tsv --formats tsv
-
-# Generate multiple output formats and plots
-python mass_spec_comparision.py alt_data.parquet ground_truth.parquet --output-dir results/ --formats csv tsv parquet excel
-
-# Quiet mode with custom plots directory
-python mass_spec_comparision.py alt_data.csv ground_truth.csv --quiet --plots-dir comparison_plots
-
-# Using both m/z and RT tolerances with different units
-python mass_spec_comparision.py alt_data.csv ground_truth.csv --ppm-tolerance 10.0 --mz-tolerance 0.02 --rt-tolerance 1.0
+python mass_spec_compare.py --ref REF_FILE --alt ALT_FILE --ref-col REF_COL --alt-col ALT_COL --output OUTPUT_BASE [OPTIONS]
 ```
 
-### Input Requirements
-Input files must contain the following columns:
-- `mz`: Mass-to-charge ratio values
-- `rt`: Retention time values
+#### Arguments
 
-### Output
-The CLI generates:
-1. **Matched data** with additional columns:
-   - `mz_by_mz`, `rt_by_mz`: ground-truth mz and rt matched by nearest mz
-   - `mz_by_rt`, `rt_by_rt`: ground-truth mz and rt matched by nearest rt
-2. **Difference calculations**:
-   - `ppm_diff_by_mz`, `ppm_diff_by_rt`: PPM differences
-   - `dalton_diff_by_mz`, `dalton_diff_by_rt`: Dalton differences
-   - `rt_diff_by_mz`, `rt_diff_by_rt`: Retention time differences
-3. **Comparison plots** (if not disabled):
-   - Tolerance-based scatter plots with color coding
-   - Statistical summaries included in plots
+*   `--ref`: Path to the reference data file (Required).
+*   `--alt`: Path to the alternative data file (Required).
+*   `--ref-col`: Column name in the reference data to compare (Required).
+*   `--alt-col`: Column name in the alternative data to compare (Required).
+*   `--output`: Base name for the output files (Required).
+*   `--ref-sep`: Delimiter for the reference file (Default: auto-detect or tab).
+*   `--alt-sep`: Delimiter for the alternative file (Default: auto-detect or comma).
+*   `--ppm`: Flag to calculate and plot differences in PPM.
+*   `--ppm-marker`: Marker value for the PPM density plot (Default: 15.0).
+*   `--img-fmt`: Image format for the plot (Default: png).
 
-## Python API
+#### Examples
 
-### match_ground_truth
-Signature:
-```python
-match_ground_truth(alt_data: pl.DataFrame,
-                   ground_truth: pl.DataFrame,
-                   *,
-                   tolerance_mz: float | None = None,
-                   tolerance_rt: float | None = None) -> pl.DataFrame
+**Basic Comparison (Absolute Difference):**
+
+```bash
+python mass_spec_compare.py --ref reference.tsv --alt experimental.csv --ref-col "mz" --alt-col "mz" --output results
 ```
 
-- Matches each row in `alt_data` to the nearest row in `ground_truth` by `mz` and independently by `rt`.
-- Returns `alt_data` with four new columns:
-  - `mz_by_mz`, `rt_by_mz`: ground-truth mz and rt matched by nearest mz
-  - `mz_by_rt`, `rt_by_rt`: ground-truth mz and rt matched by nearest rt
-- If `tolerance_mz` or `tolerance_rt` is provided, matches with absolute difference greater than the tolerance are set to null.
+**PPM Comparison with Custom Marker:**
 
-### calculate_differences
-Signature:
-```python
-calculate_differences(matched_data: pl.DataFrame) -> pl.DataFrame
+```bash
+python mass_spec_compare.py --ref reference.tsv --alt experimental.csv --ref-col "mz" --alt-col "mz" --output results_ppm --ppm --ppm-marker 20
 ```
 
-Given the output of `match_ground_truth`, computes ppm and RT differences:
-- `ppm_diff_by_mz`, `ppm_diff_by_rt`: PPM differences
-- `dalton_diff_by_mz`, `dalton_diff_by_rt`: Dalton differences
-- `rt_diff_by_mz`, `rt_diff_by_rt`: Retention time differences
+### Python API
 
-### plot_tolerance_scatter
-Signature:
-```python
-plot_tolerance_scatter(x_series: pl.Series, y_series: pl.Series,
-                       x_tol: float, y_tol: float,
-                       x_label: str = None, y_label: str = None,
-                       title: str = None, figsize: tuple = (10, 8)) -> plt.Figure
-```
+You can also import the functions into your own Python scripts or Jupyter notebooks:
 
-Create academic-style scatter plots with tolerance-based color coding:
-- **Green**: Within both x_tol and y_tol (good matches)
-- **Blue**: Within x_tol only
-- **Yellow**: Within y_tol only
-- **Red**: Outside both tolerances (poor matches)
-
-### Example (Python API)
 ```python
 import polars as pl
-from mass_spec_comparision import match_ground_truth, calculate_differences
+from mass_spec_compare import tabular_sorted_search, calculate_differences, sort_results, plot_differences
 
-alt = pl.DataFrame({"mz": [100.0, 200.0], "rt": [5.1, 10.2]})
-gt = pl.DataFrame({"mz": [99.99, 200.01], "rt": [5.0, 10.3]})
+# Load data
+ref_data = pl.read_csv("reference.tsv", separator="\t")
+alt_data = pl.read_csv("experimental.csv", separator=",")
 
-matched = match_ground_truth(alt, gt, tolerance_mz=0.05, tolerance_rt=0.5)
-diffs = calculate_differences(matched)
+# Perform search
+matched_data = tabular_sorted_search(alt_data, "mz", ref_data, "mz")
+
+# Calculate differences (with PPM)
+final_data = calculate_differences(matched_data, "mz", "mz", calculate_ppm=True)
+
+# Sort results
+final_data = sort_results(final_data, "diff_in_ppm")
+
+# Save and Plot
+final_data.write_csv("results.tsv", separator="\t")
+plot_differences(final_data, "results", column_to_plot="diff_in_ppm", ppm_marker=20.0)
 ```
 
-## Notes
-- The implementation uses Polars `join_asof` (strategy="nearest") under the hood. Inputs are cast to Float64 and the original input order is preserved.
-- Use the `tolerance_*` parameters when you want to reject far-away matches rather than accept the nearest match unconditionally.
-- CLI supports CSV, TSV, Parquet, and Excel file formats for both input and output.
-- Generated plots include statistical summaries and use a color scheme that reflects tolerance compliance.
+## Output
+
+The tool generates two files:
+
+1.  **`{OUTPUT_BASE}_table.tsv`**: A tab-separated file containing the merged data and calculated differences, sorted by the difference.
+2.  **`{OUTPUT_BASE}_plot.png`**: A visualization of the differences (Histogram or Density Plot).
