@@ -92,7 +92,7 @@ If you simply calculated the Euclidean distance, the dimension with the larger n
 The tool generates three files:
 
 1.  **`{OUTPUT}_table.tsv`**: The main results table containing the merged data, calculated differences, and normalized distances.
-2.  **`{OUTPUT}_plot.png`**: A correspondence scatter plot of the first two dimensions.
+2.  **`{OUTPUT}_plot.png`**: A correspondence scatter plot of the first two dimensions, including a text box with summary statistics.
 3.  **`{OUTPUT}_stats.tsv`**: A summary statistics file containing:
     *   **Total Euclidean Distance**: Sum of normalized distances for all matches.
     *   **Mean Euclidean Distance**: Average normalized distance.

@@ -127,13 +127,15 @@ def assemble_results(
 def plot_correspondence(
     data: pl.DataFrame, 
     dims: List[Tuple[str, str, str]], 
-    output_path: str
+    output_path: str,
+    stats: Optional[Dict[str, float]] = None
 ):
     """
     Generates a correspondence scatter plot for the first two dimensions.
     Ref points: Green Circles ('go')
     Alt points: Blue Triangles ('b^')
     Lines connect matched pairs.
+    Optionally displays summary statistics.
     """
     if len(dims) < 2:
         print("Warning: Need at least 2 dimensions for scatter plot. Skipping plot.")
@@ -148,9 +150,6 @@ def plot_correspondence(
     y_ref_res = f"ref_{y_ref_col}"
     
     # Extract data
-    # We need to be careful with column names if they are the same in alt and ref (which they often are)
-    # The result df has alt columns as original names, and ref columns as 'ref_' + original
-    
     alt_x = data[x_alt_col].to_numpy()
     alt_y = data[y_alt_col].to_numpy()
     
@@ -159,17 +158,7 @@ def plot_correspondence(
     
     plt.figure(figsize=(10, 8))
     
-    # Plot connections first so points are on top
-    # We can plot all lines at once using a collection or just a loop
-    # For matplotlib, plotting many lines can be slow if done individually. 
-    # But for typical mass spec comparison (thousands of points), it might be okay.
-    # Let's use plot with None separators for efficiency if needed, or just a loop for simplicity first.
-    # Actually, plotting segments is better.
-    
     # Create segments: [(x1, y1), (x2, y2)]
-    # We can plot all lines as a single plot command with None in between to break lines
-    # x_coords = [x1, x2, None, x3, x4, None, ...]
-    
     x_coords = []
     y_coords = []
     for i in range(len(data)):
@@ -185,7 +174,16 @@ def plot_correspondence(
     plt.xlabel(f"{x_name} ({x_alt_col} / {x_ref_col})")
     plt.ylabel(f"{y_name} ({y_alt_col} / {y_ref_col})")
     plt.title(f"Correspondence Plot: {x_name} vs {y_name}")
-    plt.legend()
+    
+    # Add Stats Box if provided
+    if stats:
+        stats_text = "\n".join([f"{k}: {v:.4f}" for k, v in stats.items()])
+        # Place text box in upper left by default, but outside axes or in a corner
+        # transform=plt.gca().transAxes uses relative coordinates (0,0 is bottom left, 1,1 is top right)
+        plt.text(0.02, 0.98, stats_text, transform=plt.gca().transAxes,
+                 fontsize=10, verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+    
+    plt.legend(loc='lower right')
     plt.grid(True, alpha=0.3)
     
     full_output_path = f"{output_path}_plot.png"
@@ -270,10 +268,6 @@ def run_multidim_comparison(
     final_data.write_csv(output_table_path, separator='\t')
     print(f"Results saved to {output_table_path}")
     
-    # Generate Plot
-    print("Generating correspondence plot...")
-    plot_correspondence(final_data, dims, output_path)
-    
     # Calculate and Save Summary Statistics
     print("Calculating summary statistics...")
     distances = final_data["normalized_distance"]
@@ -289,6 +283,15 @@ def run_multidim_comparison(
     output_stats_path = f"{output_path}_stats.tsv"
     stats_df.write_csv(output_stats_path, separator='\t')
     print(f"Summary statistics saved to {output_stats_path}")
+    
+    # Generate Plot (now with stats)
+    print("Generating correspondence plot...")
+    stats_dict = {
+        "Total Dist": total_dist,
+        "Mean Dist": mean_dist,
+        "Median Dist": median_dist
+    }
+    plot_correspondence(final_data, dims, output_path, stats=stats_dict)
     
     return final_data
 
