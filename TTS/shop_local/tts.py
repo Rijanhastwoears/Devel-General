@@ -58,7 +58,7 @@ AVAILABLE_VOICES = ['alba', 'marius', 'javert', 'jean', 'fantine', 'cosette', 'e
 class TTSConfig:
     """TTS processing parameters for pocket-tts."""
     voice: str = "alba"
-    chunk_size: int = 500
+    chunk_size: int = 50
     retries: int = 3
 
     def __post_init__(self):
@@ -96,10 +96,48 @@ def create_run_log(full_audio_dir: Path, run_info: dict) -> Path:
     return log_file
 
 
-def chunk_text(text: str, chunk_size: int = 500) -> list[str]:
-    """Split text into word-based chunks."""
-    words = text.split()
-    return [" ".join(words[i:i+chunk_size]) for i in range(0, len(words), chunk_size)]
+def chunk_text(text: str, chunk_size: int = 50) -> list[str]:
+    """
+    Split text into chunks based on paragraphs, ensuring each chunk has at least `chunk_size` words.
+    
+    Rules:
+    - Split by double newlines to get paragraphs.
+    - If a paragraph has >= chunk_size words, it becomes a chunk.
+    - If a paragraph has < chunk_size words, combine with subsequent paragraphs until >= chunk_size.
+    - If the last accumulated chunk is < chunk_size, it is kept as the final chunk.
+    """
+    paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
+    if not paragraphs:
+        return []
+
+    chunks = []
+    current_chunk = []
+    current_word_count = 0
+
+    for paragraph in paragraphs:
+        word_count = len(paragraph.split())
+        
+        # If adding this paragraph exceeds or meets the target, or if we have enough already
+        if current_word_count + word_count >= chunk_size:
+             # If we already have content, add it to the chunk
+            if current_chunk:
+                current_chunk.append(paragraph)
+                chunks.append("\n\n".join(current_chunk))
+                current_chunk = []
+                current_word_count = 0
+            else:
+                # This single paragraph is large enough on its own
+                chunks.append(paragraph)
+        else:
+            # Not enough words yet, accumulate
+            current_chunk.append(paragraph)
+            current_word_count += word_count
+
+    # Add any remaining accumulated text
+    if current_chunk:
+        chunks.append("\n\n".join(current_chunk))
+
+    return chunks
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -406,7 +444,7 @@ def process_file(
     input_file: str,
     output_dir: str,
     voice: str = "alba",
-    chunk_size: int = 500
+    chunk_size: int = 50
 ) -> dict:
     """
     Process a single text file to audio using pocket-tts.
@@ -435,7 +473,7 @@ def process_dir(
     input_dir: str,
     output_dir: str,
     voice: str = "alba",
-    chunk_size: int = 500
+    chunk_size: int = 50
 ) -> tuple[dict, Path]:
     """
     Process all .txt files in a directory.
@@ -485,7 +523,7 @@ if __name__ == "__main__":
     parser.add_argument("--retry", action="store_true", help="Retry failed chunks in output dir")
     parser.add_argument("--voice", default="alba", choices=AVAILABLE_VOICES,
                         help="Voice name (default: alba)")
-    parser.add_argument("--chunk-size", type=int, default=500, help="Words per chunk")
+    parser.add_argument("--chunk-size", type=int, default=50, help="Words per chunk")
 
     args = parser.parse_args()
 
